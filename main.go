@@ -15,7 +15,6 @@ func main() {
 		Commands: []*cli.Command{
 			commands.TimeDiffCommand,
 			commands.OrganiseCommand,
-			commands.CopyMetaCommand,
 		},
 	}
 
