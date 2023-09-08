@@ -55,13 +55,17 @@ func organise(srcDir, dstDir string, shift time.Duration) error {
 
 	for _, file := range files {
 		imagePath := filepath.Join(srcDir, file.Name())
-
-		originalTime, err := helpers.GetImageTime(imagePath)
+		imageExif, err := helpers.NewImageExif(imagePath)
 		if err != nil {
 			if errors.As(err, &exif.ErrNoExif) {
 				fmt.Printf("Skipping file with no exif data: %q", imagePath)
 				continue
 			}
+			return err
+		}
+
+		originalTime, err := imageExif.GetImageTime()
+		if err != nil {
 			return err
 		}
 
@@ -74,7 +78,12 @@ func organise(srcDir, dstDir string, shift time.Duration) error {
 			return err
 		}
 
-		err = helpers.SetImageTime(dstPath, newTime)
+		destExif, err := helpers.NewImageExif(dstPath)
+		if err != nil {
+			return err
+		}
+
+		err = destExif.SetImageTime(newTime)
 		if err != nil {
 			return err
 		}

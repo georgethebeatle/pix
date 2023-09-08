@@ -28,11 +28,21 @@ var TimeDiffCommand = &cli.Command{
 }
 
 func timediff(image1, image2 string) (time.Duration, error) {
-	time1, err := helpers.GetImageTime(image1)
+	image1Exif, err := helpers.NewImageExif(image1)
 	if err != nil {
 		return 0, err
 	}
-	time2, err := helpers.GetImageTime(image2)
+
+	image2Exif, err := helpers.NewImageExif(image2)
+	if err != nil {
+		return 0, err
+	}
+
+	time1, err := image1Exif.GetImageTime()
+	if err != nil {
+		return 0, err
+	}
+	time2, err := image2Exif.GetImageTime()
 	if err != nil {
 		return 0, err
 	}

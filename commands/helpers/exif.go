@@ -15,61 +15,101 @@ import (
 
 const DateTimeOriginal = "DateTimeOriginal"
 
-func GetImageTime(imagePath string) (time.Time, error) {
+type ImageExif struct {
+	imagePath  string
+	exifBytes  []byte
+	exifOffset int64
+	ifd        *exif.Ifd
+}
+
+func NewImageExif(imagePath string) (*ImageExif, error) {
 	f, err := os.Open(imagePath)
 	if err != nil {
-		return time.Time{}, err
+		return &ImageExif{}, err
 	}
 	defer f.Close()
 
-	rawExif, _, err := extractExifBytes(f)
+	rawExif, exifOffset, err := extractExifBytes(f)
 	if err != nil {
-		return time.Time{}, err
+		return &ImageExif{}, err
 	}
 
 	rootIfd, err := getRootIfd(rawExif)
 	if err != nil {
-		return time.Time{}, err
+		return &ImageExif{}, err
 	}
 	exifIfd, err := rootIfd.ChildWithIfdPath(exifcommon.IfdExifStandardIfdIdentity)
 	if err != nil {
-		return time.Time{}, err
+		return &ImageExif{}, err
 	}
 
-	results, err := exifIfd.FindTagWithName(DateTimeOriginal)
-	if err != nil {
-		return time.Time{}, err
-	}
-
-	if len(results) == 0 {
-		return time.Time{}, fmt.Errorf("image does not have tags with name %q", DateTimeOriginal)
-	}
-
-	dateStr, err := results[0].FormatFirst()
-	if err != nil {
-		return time.Time{}, err
-	}
-
-	return time.Parse("2006:01:02 15:04:05", dateStr)
+	return &ImageExif{
+		imagePath:  imagePath,
+		exifBytes:  rawExif,
+		exifOffset: exifOffset,
+		ifd:        exifIfd,
+	}, nil
 }
 
-func SetImageTime(imagePath string, newTime time.Time) error {
-	f, err := os.OpenFile(imagePath, os.O_RDWR, 0o755)
+func (i *ImageExif) GetTagValue(tagName string) (string, error) {
+	tags, err := i.ifd.FindTagWithName(tagName)
+	if err != nil {
+		return "", err
+	}
+
+	if len(tags) == 0 {
+		return "", fmt.Errorf("image does not have tags with name %q", tagName)
+	}
+
+	tagStr, err := tags[0].FormatFirst()
+	if err != nil {
+		return "", err
+	}
+
+	return tagStr, nil
+}
+
+func (i *ImageExif) GetImageTime() (time.Time, error) {
+	dateStr, err := i.GetTagValue(DateTimeOriginal)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to get image time: %w", err)
+	}
+
+	imageTime, err := time.Parse("2006:01:02 15:04:05", dateStr)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	timeOffset, _ := i.GetTagValue("OffsetTimeOriginal")
+	if timeOffset == "" {
+		timeOffset = "00:00"
+	}
+
+	var hours, minutes int
+	_, err = fmt.Sscanf(timeOffset, "%d:%d", &hours, &minutes)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	return imageTime.Add(-time.Duration(hours) * time.Hour).Add(-time.Duration(minutes) * time.Minute), nil
+}
+
+func (i *ImageExif) SetImageTime(newTime time.Time) error {
+	f, err := os.OpenFile(i.imagePath, os.O_RDWR, 0o755)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	exifBytes, exifStartByte, err := extractExifBytes(f)
+	dateStr, err := i.GetTagValue(DateTimeOriginal)
 	if err != nil {
 		return err
 	}
-
-	oldDate := []byte("2023:06:18 11:28:22")
+	oldDate := []byte(dateStr)
 	newDate := newTime.AppendFormat([]byte{}, "2006:01:02 15:04:05")
-	updatedExifBytes := bytes.ReplaceAll(exifBytes, oldDate, newDate)
+	updatedExifBytes := bytes.ReplaceAll(i.exifBytes, oldDate, newDate)
 
-	offset, err := f.Seek(exifStartByte, io.SeekStart)
+	offset, err := f.Seek(i.exifOffset, io.SeekStart)
 	if err != nil {
 		return err
 	}
@@ -78,6 +118,24 @@ func SetImageTime(imagePath string, newTime time.Time) error {
 	if err != nil {
 		return err
 	}
+
+	rawExif, exifOffset, err := extractExifBytes(f)
+	if err != nil {
+		return err
+	}
+
+	rootIfd, err := getRootIfd(rawExif)
+	if err != nil {
+		return err
+	}
+	exifIfd, err := rootIfd.ChildWithIfdPath(exifcommon.IfdExifStandardIfdIdentity)
+	if err != nil {
+		return err
+	}
+
+	i.exifBytes = rawExif
+	i.exifOffset = exifOffset
+	i.ifd = exifIfd
 
 	return nil
 }
